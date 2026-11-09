@@ -210,4 +210,33 @@ describe('electron/main', async () => {
     expect(sendMocked.mock.calls[1][1]).toBeTypeOf('object')
     expect(sendMocked.mock.calls[1][1].eventa.body.content).toEqual({ output: '100' })
   })
+
+  it('filters disallowed senders via allowSender and broadcasts to targets when unbound', async () => {
+    const ipcMain = {
+      on: vi.fn(),
+    } as unknown as IpcMain
+    const firstContents = { id: 1, isDestroyed: () => false, send: vi.fn() } as unknown as WebContents
+    const secondContents = { id: 2, isDestroyed: () => false, send: vi.fn() } as unknown as WebContents
+
+    const { context: ctx } = createContext(ipcMain, undefined, {
+      allowSender: event => event.sender.id === 1,
+      targets: () => [firstContents, secondContents],
+    })
+
+    const eventa = defineEventa<{ message: string }>()
+    const received = vi.fn()
+    ctx.on(eventa, received)
+
+    const handleMessage = (ipcMain.on as Mock).mock.calls.find(([name]) => name === 'eventa-message')![1]
+    handleMessage({ sender: secondContents } as IpcMainEvent, {
+      deliveryId: 'blocked-delivery',
+      hopsRemaining: 32,
+      eventa: { ...eventa, body: { message: 'blocked' } },
+    } satisfies EventaInner<{ message: string }>)
+    expect(received).not.toHaveBeenCalled()
+
+    await ctx.emit(eventa, { message: 'broadcast' })
+    expect(firstContents.send).toHaveBeenCalledTimes(1)
+    expect(secondContents.send).toHaveBeenCalledTimes(1)
+  })
 })

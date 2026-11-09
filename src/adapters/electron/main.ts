@@ -1,4 +1,4 @@
-import type { BrowserWindow, IpcMain, IpcMainEvent } from 'electron'
+import type { BrowserWindow, IpcMain, IpcMainEvent, WebContents } from 'electron'
 
 import type { CreateContextOptions } from '../../context'
 
@@ -23,6 +23,18 @@ export interface ElectronMainAdapterOptions {
    * @default false
    */
   onlySameWindow?: boolean
+  /**
+   * Optional predicate that validates every incoming IPC event before parsing
+   * or dispatch (e.g. verifying `event.senderFrame === event.sender.mainFrame`
+   * and checking the sender URL).
+   */
+  allowSender?: (event: IpcMainEvent) => boolean
+  /**
+   * Optional fallback targets used when the main process emits an outbound
+   * event without a bound `window` and without an inbound `raw.ipcMainEvent`
+   * (for example, broadcasting state changes to all registered windows).
+   */
+  targets?: () => Iterable<WebContents | BrowserWindow>
   /** IPC channel carrying Eventa inner values, or `false` to disable it. @default 'eventa-message' */
   messageEventName?: string | false
   /** IPC channel dispatched as adapter errors, or `false` to disable it. @default 'eventa-error' */
@@ -35,12 +47,28 @@ export interface ElectronMainAdapterOptions {
 
 /** Raw main-process IPC metadata exposed to Eventa listeners. */
 export interface ElectronMainEmitOptions {
-  raw: { ipcMainEvent: IpcMainEvent, event: Event | unknown }
+  raw?: {
+    ipcMainEvent?: IpcMainEvent
+    event?: Event | unknown
+    targetWebContents?: WebContents | Iterable<WebContents | BrowserWindow>
+  }
 }
 
 /** Invoke metadata made available by the Electron main-process context. */
 export interface ElectronMainContextExtensions {
   invokeRequest?: { raw?: ElectronMainEmitOptions['raw'] }
+}
+
+function sendToWebContents(target: WebContents | BrowserWindow, channel: string, inner: unknown) {
+  if ('webContents' in target) {
+    if (!target.isDestroyed() && !target.webContents.isDestroyed()) {
+      target.webContents.send(channel, inner)
+    }
+    return
+  }
+  if (!target.isDestroyed()) {
+    target.send(channel, inner)
+  }
 }
 
 /**
@@ -54,6 +82,8 @@ export function createContext(ipcMain: IpcMain, window?: BrowserWindow, options?
     errorEventName = 'eventa-error',
     extraListeners = {},
     onlySameWindow = false,
+    allowSender,
+    targets,
   } = options || {}
   if (onlySameWindow && (!window || window.isDestroyed() || window.webContents.isDestroyed())) {
     throw new TypeError('eventa: onlySameWindow requires a live BrowserWindow')
@@ -69,6 +99,9 @@ export function createContext(ipcMain: IpcMain, window?: BrowserWindow, options?
   function listen(type: string, listener: Parameters<IpcMain['on']>[1]) {
     cleanupRemoval.push(withRemoval(ipcMain, type, (event, ...args) => {
       if (disposed || (boundWindow && event.sender !== boundWindow.webContents)) {
+        return
+      }
+      if (allowSender && !allowSender(event)) {
         return
       }
       return listener(event, ...args)
@@ -102,10 +135,32 @@ export function createContext(ipcMain: IpcMain, window?: BrowserWindow, options?
         return
       }
 
-      // Without a bound window, the inbound IPC sender is the only known destination.
+      const explicitTarget = callOptions?.raw?.targetWebContents
+      if (explicitTarget != null) {
+        if (Symbol.iterator in Object(explicitTarget)) {
+          for (const target of explicitTarget as Iterable<WebContents | BrowserWindow>) {
+            sendToWebContents(target, messageEventName, inner)
+          }
+        }
+        else {
+          sendToWebContents(explicitTarget as WebContents | BrowserWindow, messageEventName, inner)
+        }
+        return
+      }
+
+      // Without a bound window, the inbound IPC sender is the primary destination.
       const sender = callOptions?.raw?.ipcMainEvent?.sender
-      if (sender != null && !sender.isDestroyed()) {
-        sender.send(messageEventName, inner)
+      if (sender != null) {
+        if (!sender.isDestroyed()) {
+          sender.send(messageEventName, inner)
+        }
+        return
+      }
+
+      if (targets != null) {
+        for (const target of targets()) {
+          sendToWebContents(target, messageEventName, inner)
+        }
       }
     }
     catch (error) {

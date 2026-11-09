@@ -3,6 +3,52 @@ import type { EventaInner } from '../internal'
 
 import { defineInboundEventa, defineOutboundEventa } from '../eventa'
 import { getEventaInner, isEventaInner, setEventaInner } from '../internal'
+import { InvokeEventType, isReceiveEvent } from '../invoke-shared'
+
+interface SerializedErrorExtras {
+  __eventaErrorExtras?: Record<string, unknown>
+}
+
+function serializeInvokeErrorEventa(eventa: Eventa): Eventa {
+  if (!isReceiveEvent(eventa) || eventa.invokeType !== InvokeEventType.ReceiveEventError) {
+    return eventa
+  }
+  const body = eventa.body as { invokeId?: string, content?: { error?: unknown } } | undefined
+  const err = body?.content?.error
+  if (!(err instanceof Error)) {
+    return eventa
+  }
+  const extras: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(err)) {
+    extras[key] = value
+  }
+  if (Object.keys(extras).length === 0) {
+    return eventa
+  }
+  return {
+    ...eventa,
+    body: {
+      ...body,
+      content: {
+        ...body?.content,
+        __eventaErrorExtras: extras,
+      } satisfies { error?: unknown } & SerializedErrorExtras,
+    },
+  }
+}
+
+function restoreInvokeErrorEventa(eventa: Eventa): Eventa {
+  if (!isReceiveEvent(eventa) || eventa.invokeType !== InvokeEventType.ReceiveEventError) {
+    return eventa
+  }
+  const body = eventa.body as { invokeId?: string, content?: { error?: unknown } & SerializedErrorExtras } | undefined
+  const err = body?.content?.error
+  const extras = body?.content?.__eventaErrorExtras
+  if (err instanceof Error && extras && typeof extras === 'object') {
+    Object.assign(err, extras)
+  }
+  return eventa
+}
 
 interface LegacyAdapterValue<T = unknown> {
   id: string
@@ -48,11 +94,12 @@ export function createOutboundInner(eventa: Eventa): (EventaInner & LegacyAdapte
   if (!inner) {
     return undefined
   }
+  const serializedEventa = serializeInvokeErrorEventa(inner.eventa)
   return createAdapterInner({
     ...inner,
     eventa: {
-      ...inner.eventa,
-      ...defineOutboundEventa(inner.eventa.id),
+      ...serializedEventa,
+      ...defineOutboundEventa(serializedEventa.id),
     },
   })
 }
@@ -82,11 +129,12 @@ export function restoreInner(value: unknown): EventaInner {
     throw new TypeError('Invalid EventaInner.')
   }
 
+  const restoredEventa = restoreInvokeErrorEventa(inner.eventa)
   const restored: EventaInner = {
     ...inner,
     eventa: {
-      ...inner.eventa,
-      ...defineInboundEventa(inner.eventa.id),
+      ...restoredEventa,
+      ...defineInboundEventa(restoredEventa.id),
     },
   }
   setEventaInner(restored.eventa, restored)

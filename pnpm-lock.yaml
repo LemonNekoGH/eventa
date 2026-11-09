@@ -203,12 +203,6 @@ catalogs:
     hono:
       specifier: ^4.13.16
       version: 4.13.16
-    nanoid:
-      specifier: ^6.0.2
-      version: 6.0.2
-    picomatch:
-      specifier: ^4.0.7
-      version: 4.0.7
     playwright:
       specifier: ^1.65.0
       version: 1.65.0
@@ -245,10 +239,10 @@ importers:
         specifier: '>=2.0.8'
         version: 2.0.8(crossws@0.4.17(srvx@1.0.6))
       nanoid:
-        specifier: 'catalog:'
+        specifier: ^6.0.2
         version: 6.0.2
       picomatch:
-        specifier: 'catalog:'
+        specifier: ^4.0.7
         version: 4.0.7
       web-worker:
         specifier: ^1.5.0

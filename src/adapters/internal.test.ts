@@ -4,9 +4,37 @@ import { describe, expect, it } from 'vitest'
 
 import { EventaType } from '../eventa'
 import { setEventaInner } from '../internal'
+import { defineInvokeEventa } from '../invoke-shared'
 import { createOutboundInner, restoreInner } from './internal'
 
 describe('adapter inner contract', () => {
+  it('preserves enumerable Error properties across structuredClone for ReceiveEventError', () => {
+    const invokeEvent = defineInvokeEventa<string, string>('adapter:error-extras')
+    const error = Object.assign(new Error('permission denied'), {
+      reason: 'screen-capture-denied',
+      request: { status: 403, url: 'https://fleet.example/api' },
+    })
+    const eventa = {
+      ...invokeEvent.receiveEventError,
+      body: { invokeId: 'inv-1', content: { error } },
+    }
+    const inner: EventaInner = {
+      deliveryId: 'error-delivery',
+      hopsRemaining: 8,
+      eventa,
+    }
+    setEventaInner(eventa, inner)
+
+    const outbound = createOutboundInner(eventa)
+    const cloned = structuredClone(outbound)
+    const restored = restoreInner(cloned)
+    const restoredError = (restored.eventa.body as { content: { error: Error & { reason?: string, request?: unknown } } }).content.error
+
+    expect(restoredError).toBeInstanceOf(Error)
+    expect(restoredError.message).toBe('permission denied')
+    expect(restoredError.reason).toBe('screen-capture-denied')
+    expect(restoredError.request).toEqual({ status: 403, url: 'https://fleet.example/api' })
+  })
   // https://github.com/moeru-ai/airi/actions/runs/31695542940/job/94432374039
   // ROOT CAUSE:
   //

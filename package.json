@@ -144,8 +144,8 @@
     }
   },
   "dependencies": {
-    "nanoid": "catalog:",
-    "picomatch": "catalog:"
+    "nanoid": "^6.0.2",
+    "picomatch": "^4.0.7"
   },
   "devDependencies": {
     "@antfu/eslint-config": "catalog:",

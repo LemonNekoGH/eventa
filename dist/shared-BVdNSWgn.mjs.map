@@ -1,0 +1,1 @@
+{"version":3,"file":"shared-BVdNSWgn.mjs","names":[],"sources":["../src/adapters/electron/shared.ts"],"sourcesContent":["import { defineEventa } from '../../eventa'\n\nexport const errorEvent = { ...defineEventa<{ error: unknown }>() }\n"],"mappings":";;AAEA,MAAa,aAAa,EAAE,GAAG,aAAiC,EAAE"}
